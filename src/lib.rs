@@ -106,7 +106,7 @@ pub struct Cesu8DecodingError;
 
 impl Error for Cesu8DecodingError {
     fn description(&self) -> &str { "decoding error" }
-    fn cause(&self) -> Option<&Error> { None }
+    fn cause(&self) -> Option<&dyn Error> { None }
 }
 
 impl fmt::Display for Cesu8DecodingError {
@@ -277,15 +277,15 @@ fn decode_from_iter(
                     let third = next_cont!();
                     match (first, second) {
                         // These are valid UTF-8, so pass them through.
-                        (0xE0         , 0xA0 ... 0xBF) |
-                        (0xE1 ... 0xEC, 0x80 ... 0xBF) |
-                        (0xED         , 0x80 ... 0x9F) |
-                        (0xEE ... 0xEF, 0x80 ... 0xBF) => {
+                        (0xE0         , 0xA0 ..= 0xBF) |
+                        (0xE1 ..= 0xEC, 0x80 ..= 0xBF) |
+                        (0xED         , 0x80 ..= 0x9F) |
+                        (0xEE ..= 0xEF, 0x80 ..= 0xBF) => {
                             decoded.extend([first, second, third].iter()
                                                .cloned())
                         }
                         // First half a surrogate pair, so decode.
-                        (0xED         , 0xA0 ... 0xAF) => {
+                        (0xED         , 0xA0 ..= 0xAF) => {
                             if next!() != 0xED { err!() }
                             let fifth = next_cont!();
                             if fifth < 0xB0 || 0xBF < fifth { err!() }
