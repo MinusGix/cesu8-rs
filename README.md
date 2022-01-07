@@ -6,6 +6,8 @@
 
 [apidoc]: http://emk.github.io/cesu8-rs/cesu8/index.html
 
+NOTE: This fork is not currently used anywhere.
+
 Convert between ordinary UTF-8 and [CESU-8][] encodings.
 
 CESU-8 encodes characters outside the Basic Multilingual Plane as two
