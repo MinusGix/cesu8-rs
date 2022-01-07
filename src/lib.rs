@@ -184,7 +184,7 @@ fn from_cesu8_internal(bytes: &[u8], variant: Variant) -> Result<Cow<str>, Cesu8
         Ok(str) => Ok(Cow::Borrowed(str)),
         _ => {
             let mut decoded = Vec::with_capacity(bytes.len());
-            if decode_from_iter(&mut decoded, &mut bytes.iter(), variant) {
+            if decode_from_iter(&mut decoded, &mut bytes.iter(), variant).is_some() {
                 // Keep this assertion in debug mode only.  It's important
                 // that this assertion is true, because Rust assumes that
                 // all UTF-8 strings are valid.
@@ -226,62 +226,49 @@ fn test_from_cesu8() {
     // specification, I decided to use a test character from ICU instead.
 }
 
-// Our internal decoder, based on Rust's is_utf8 implementation.
-fn decode_from_iter(decoded: &mut Vec<u8>, iter: &mut slice::Iter<u8>, variant: Variant) -> bool {
-    macro_rules! err {
-        () => {
-            return false
-        };
+fn next_cont(byte: u8) -> Option<u8> {
+    if byte & !CONT_MASK == TAG_CONT_U8 {
+        Some(byte)
+    } else {
+        None
     }
-    macro_rules! next {
-        () => {
-            match iter.next() {
-                Some(a) => *a,
-                // We needed data, but there was none: error!
-                None => err!(),
-            }
-        };
-    }
-    macro_rules! next_cont {
-        () => {{
-            let byte = next!();
-            if (byte) & !CONT_MASK == TAG_CONT_U8 {
-                byte
-            } else {
-                err!()
-            }
-        }};
-    }
+}
 
+// Our internal decoder, based on Rust's is_utf8 implementation.
+fn decode_from_iter(
+    decoded: &mut Vec<u8>,
+    iter: &mut slice::Iter<u8>,
+    variant: Variant,
+) -> Option<()> {
     loop {
         let first = match iter.next() {
             Some(&b) => b,
             // We're at the end of the iterator and a codepoint boundary at
             // the same time, so this string is valid.
-            None => return true,
+            None => return Some(()),
         };
 
         if variant == Variant::Java && first == 0 {
             // Java's modified UTF-8 should never contain \0 directly.
-            err!();
+            return None;
         } else if first < 128 {
             // Pass ASCII through directly.
             decoded.push(first);
         } else if first == 0xc0 && variant == Variant::Java {
-            match next!() {
-                0x80 => decoded.push(0),
-                _ => err!(),
+            match iter.next() {
+                Some(0x80) => decoded.push(0),
+                _ => return None,
             }
         } else {
             let w = utf8_char_width(first);
-            let second = next_cont!();
+            let second = next_cont(*iter.next()?)?;
             match w {
                 // Two-byte sequences can be used directly.
                 2 => {
                     decoded.extend([first, second].iter().cloned());
                 }
                 3 => {
-                    let third = next_cont!();
+                    let third = next_cont(*iter.next()?)?;
                     match (first, second) {
                         // These are valid UTF-8, so pass them through.
                         (0xE0, 0xA0..=0xBF)
@@ -292,21 +279,21 @@ fn decode_from_iter(decoded: &mut Vec<u8>, iter: &mut slice::Iter<u8>, variant: 
                         }
                         // First half a surrogate pair, so decode.
                         (0xED, 0xA0..=0xAF) => {
-                            if next!() != 0xED {
-                                err!()
+                            if iter.next().copied() != Some(0xED) {
+                                return None;
                             }
-                            let fifth = next_cont!();
+                            let fifth = next_cont(*iter.next()?)?;
                             if fifth < 0xB0 || 0xBF < fifth {
-                                err!()
+                                return None;
                             }
-                            let sixth = next_cont!();
+                            let sixth = next_cont(*iter.next()?)?;
                             let s = dec_surrogates(second, third, fifth, sixth);
                             decoded.extend(s.iter().cloned());
                         }
-                        _ => err!(),
+                        _ => return None,
                     }
                 }
-                _ => err!(),
+                _ => return None,
             }
         }
     }
